@@ -13,6 +13,7 @@ import {mine, takeSnapshot, time } from "@nomicfoundation/hardhat-network-helper
 import { getNetwork } from "@ethersproject/providers";
 import {} from "@nomiclabs/hardhat-waffle";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { increase, increaseTo, latest, latestBlock } from "@nomicfoundation/hardhat-network-helpers/dist/src/helpers/time";
 
 describe("MagicNumbers Test", async function() {
 
@@ -99,11 +100,13 @@ describe("MagicNumbers Test", async function() {
         })
         it("Trigger the lottery", async function() {
             await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+            await time.setNextBlockTimestamp(await latest() + 1000);
             await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
             var ticketsTop = magicNumbers.getSelectedNumbers();
             expect((await ticketsTop).length).to.be.equal(10);
             for(var i = 0; i < 10; i++) {
                 await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+                await time.setNextBlockTimestamp(await latest() + 1000);
                 await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
                 var tickets = magicNumbers.getSelectedNumbers();
                 expect(areAllElementsUnique(await tickets)).to.be.true;

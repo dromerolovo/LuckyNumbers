@@ -31,6 +31,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         COORDINATOR_INSTANCE = VRFCoordinatorV2Mock(vrfCoordinator);
         s_keyHash = keyHash;
         s_owner = msg.sender;
+        interval = 900; //15 minutes in Unix timestamp
         s_subscriptionId = subscriptionId;
         ticketPrice = _ticketPrice;
         numberCeiling = numberCeiling_;
@@ -41,6 +42,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
+        populatePrizeTable();
     }
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
@@ -93,6 +95,9 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     uint8 public constant selectednUmbersUpperLimit = 10;
     uint8 public constant totalNumbers = 79;
 
+    //[hits or right guesses][selected numbers count] 
+    uint8[10][10] public immutable prizeTable;
+
     event TicketBought(uint256[] ticket);
     event TicketCapModified(uint256 ticketCap);
     event TicketPriceModified(uint256 ticketPrice);
@@ -110,6 +115,57 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         bool isItRedeemed;
         uint256 lotteryId;
         uint8[] selectedNumbers;
+    }
+
+    function populatePrizeTable() private {
+        prizeTable[1][1] = 3;
+        prizeTable[1][2] = 1;
+
+        prizeTable[2][2] = 6;
+        prizeTable[2][3] = 3;
+        prizeTable[2][4] = 1;
+        prizeTable[2][5] = 1;
+
+        prizeTable[3][3] = 25;
+        prizeTable[3][4] = 5;
+        prizeTable[3][5] = 2;
+        prizeTable[3][6] = 1;
+        prizeTable[3][7] = 1;
+
+        prizeTable[4][4] = 120;
+        prizeTable[4][5] = 10;
+        prizeTable[4][6] = 8;
+        prizeTable[4][7] = 4;
+        prizeTable[4][8] = 2;
+        prizeTable[4][9] = 1;
+        prizeTable[4][10] = 1;
+
+        prizeTable[5][5] = 380;
+        prizeTable[5][6] = 55;
+        prizeTable[5][7] = 20;
+        prizeTable[5][8] = 10;
+        prizeTable[5][9] = 5;
+        prizeTable[5][10] = 2;
+
+        prizeTable[6][6] = 2000;
+        prizeTable[6][7] = 150;
+        prizeTable[6][8] = 50;
+        prizeTable[6][9] = 30;
+        prizeTable[6][10] = 20;
+
+        prizeTable[7][7] = 5000;
+        prizeTable[7][8] = 1000;
+        prizeTable[7][9] = 200;
+        prizeTable[7][10] = 50;
+
+        prizeTable[8][8] = 20000;
+        prizeTable[8][9] = 4000;
+        prizeTable[8][10] = 500;
+
+        prizeTable[9][9] = 50000;
+        prizeTable[9][10] = 10000;
+
+        prizeTable[10][10] = 100000;
     }
 
     function modifyTicketsCap(uint256 _ticketCap) onlyOwner external virtual {
@@ -174,11 +230,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         return selectedNumbers[id];
     }
 
-    function lotteryTrigger() internal virtual {
-
-    }
-
-    function randomize(uint256 randomWord) internal virtual {
+    function triggerLottery(uint256 randomWord) internal virtual {
         uint8[] memory transitSelectedNumbers = new uint8[](10);
         bool repeated;
         //Lucky number 7 is arbitrary.
@@ -225,9 +277,13 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         } else {
             return lotterys[counter - 2].selectedNumbers;
         }
-        
-
     }
+
+    function checkPrize(uint8 selectedNumbersCount, uint8 matchCount) private {
+        
+    }
+
+    function claimPrize(uint256 ticketId, uint256 lotterId)
 
     //AUTOMATION LOGIC
 
@@ -256,23 +312,23 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         returns(bool upkeepNeeded, bytes memory)
     {
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
-        // bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
-        upkeepNeeded = lotteryTicketsCheck /*&& timestampCheck*/;
+        bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
+        upkeepNeeded = lotteryTicketsCheck && timestampCheck;
         return (upkeepNeeded,abi.encode("0x"));
     }
 
     function performUpkeep(bytes calldata) /*chainlinkAddress*/ external override {
 
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
-        // bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
-        bool upkeepNeeded = lotteryTicketsCheck /*&& timestampCheck*/;
+        bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
+        bool upkeepNeeded = lotteryTicketsCheck && timestampCheck;
 
         if(upkeepNeeded) {
             lastTimeStamp = block.timestamp;
             uint256 requestId = requestRandomWords();
             //This shouldn't be called on testnet, only locally
             COORDINATOR_INSTANCE.fulfillRandomWords(requestId, address(this));
-            randomize(s_randomWords[0]);
+            triggerLottery(s_randomWords[0]);
             delete currentLotteryTicketsId;
             uint256 counter = lotterys.length;
             currentLottery = Lottery({
