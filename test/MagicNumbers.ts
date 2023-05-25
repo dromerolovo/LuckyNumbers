@@ -1,13 +1,20 @@
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { assert } from "console";
+import helpers from "hardhat";
 import { ethers } from "hardhat";
 import { MagicNumbers, MagicNumbers__factory, VRFCoordinatorV2Mock__factory } from "../typechain-types";
 import { VRFCoordinatorV2Mock } from "../typechain-types/contracts/VRFMock.sol";
 import { exec } from "child_process";
 import { BigNumber } from "ethers";
+import "./utils";
+import { areAllElementsUnique, delay } from "./utils";
+import {mine, takeSnapshot, time } from "@nomicfoundation/hardhat-network-helpers";
+import { getNetwork } from "@ethersproject/providers";
+import {} from "@nomiclabs/hardhat-waffle";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 
-describe("MagicNumbers Test", function() {
+describe("MagicNumbers Test", async function() {
 
     let vrfMock : VRFCoordinatorV2Mock;
     let subscriptionId : number;
@@ -15,14 +22,21 @@ describe("MagicNumbers Test", function() {
 
     let magicNumbers : MagicNumbers;
     let magicNumbersAddress : string;
-    let ticketPrice : BigNumber;
+    let ticketPrice : BigNumber; 
 
     
+    let defaultAccount : SignerWithAddress;
+
 
     this.beforeEach(async function() {
+
+        
+        let [defaultAccountPre] = await ethers.getSigners();
+        defaultAccount = defaultAccountPre;
+
         const baseFee = ethers.utils.parseEther("0.1");
         const gasPriceLink = ethers.utils.parseEther("0.000000001");
-        const fundSubscriptionAmount = ethers.utils.parseEther("1");
+        const fundSubscriptionAmount = ethers.utils.parseEther("10");
 
         const VRFMock = await ethers.getContractFactory("VRFCoordinatorV2Mock");
         vrfMock = await VRFMock.deploy(baseFee, gasPriceLink);
@@ -58,7 +72,7 @@ describe("MagicNumbers Test", function() {
     
         it("Subscription should be funded", async function() {
             const subscription = await vrfMock.getSubscription(subscriptionId);
-            expect(subscription.balance.toString()).to.equal("1000000000000000000");
+            expect(subscription.balance.toString()).to.equal("10000000000000000000");
         });
     });
 
@@ -83,9 +97,18 @@ describe("MagicNumbers Test", function() {
                 count++;
             }
         })
-        it("Trigger the raffle", async function() {
+        it("Trigger the lottery", async function() {
             await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
             await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
+            var ticketsTop = magicNumbers.getSelectedNumbers();
+            expect((await ticketsTop).length).to.be.equal(10);
+            for(var i = 0; i < 10; i++) {
+                await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+                await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
+                var tickets = magicNumbers.getSelectedNumbers();
+                expect(areAllElementsUnique(await tickets)).to.be.true;
+                
+            }
         });
     });
 });

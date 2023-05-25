@@ -5,6 +5,7 @@ import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
+import "hardhat/console.sol";
 
 contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     VRFCoordinatorV2Interface immutable COORDINATOR;
@@ -35,12 +36,11 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         numberCeiling = numberCeiling_;
         lastTimeStamp = block.timestamp;
         ticketCap = 10;
-        currentRaffle = Raffle({
-            rafleId: 1,
+        currentLottery = Lottery({
+            lotteryId: 1,
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
-        raffles.push(currentRaffle);
     }
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
@@ -81,14 +81,14 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     // TICKETING AND GAME LOGIC
 
     uint256 public ticketPrice; 
-    Raffle public currentRaffle;
-    Raffle[] public raffles;
-    uint256[] private currentRaffleTicketsId;
+    Lottery public currentLottery;
+    Lottery[] public lotterys;
+    uint256[] private currentLotteryTicketsId;
     mapping (address => Ticket[]) public tickets;
     mapping(uint256 => uint8[]) public selectedNumbers;
     uint256 numberCeiling;
     uint256 private ticketCounter = 0;
-    uint256 private raffleCounter = 0;
+    uint256 private lotteryCounter = 0;
     uint256 public ticketCap;
     uint8 public constant selectednUmbersUpperLimit = 10;
     uint8 public constant totalNumbers = 79;
@@ -96,11 +96,11 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     event TicketBought(uint256[] ticket);
     event TicketCapModified(uint256 ticketCap);
     event TicketPriceModified(uint256 ticketPrice);
-    event RaffleCreated(Raffle raffle);
+    event LotteryCreated(Lottery lottery);
     event LogMessage(string message);
 
-    struct Raffle {
-        uint256 rafleId;
+    struct Lottery {
+        uint256 lotteryId;
         uint8[] selectedNumbers;
         bool resultsAnnounced;
     }
@@ -108,7 +108,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     struct Ticket {
         uint256 ticketId;
         bool isItRedeemed;
-        uint256 raffleId;
+        uint256 lotteryId;
         uint8[] selectedNumbers;
     }
 
@@ -129,8 +129,8 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         require(msg.value >= ticketPrice * numTickets, "Insufficient Ether sent");
         require(numTickets < ticketCap, "Tickets bought must not exceed the max amount or cap");
         require(selectedNumbers_.length <= selectednUmbersUpperLimit, "Selected numbers must be equal or less than 10");
-        require(currentRaffle.resultsAnnounced == false, "The raffle should not be concluded");
-        require(currentRaffle.selectedNumbers.length == 0, "The raffle should not be concluded");
+        require(currentLottery.resultsAnnounced == false, "The lottery should not be concluded");
+        require(currentLottery.selectedNumbers.length == 0, "The lottery should not be concluded");
 
         uint256[] memory ticketsIds = new uint256[](numTickets);
         
@@ -139,11 +139,11 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             Ticket memory ticket = Ticket({
                 ticketId: ticketCounter,
                 isItRedeemed: false,
-                raffleId: currentRaffle.rafleId,
+                lotteryId: currentLottery.lotteryId,
                 selectedNumbers: selectedNumbers_
             });
             tickets[msg.sender].push(ticket);
-            currentRaffleTicketsId.push(ticket.ticketId);
+            currentLotteryTicketsId.push(ticket.ticketId);
             ticketsIds[i] = ticketCounter;
             selectedNumbers[ticketCounter] = selectedNumbers_;
         }        
@@ -171,32 +171,40 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     function getSelectedNumbersTicket(uint256 id) external view returns(uint8[] memory) {
-        // uint8[] selectedNumbers_ = new uint8[](selectedNumbers[id].length);
-        // for(uint i = 0; i < selectedNumbers[id].length; i++ ) {
-        //     selectedNumbers_[i] = selectedNumbers[id];
-        // }
         return selectedNumbers[id];
     }
 
-    function raffleTrigger() internal virtual {
+    function lotteryTrigger() internal virtual {
 
     }
 
     function randomize(uint256 randomWord) internal virtual {
         uint8[] memory transitSelectedNumbers = new uint8[](10);
+        bool repeated;
+        //Lucky number 7 is arbitrary.
+        uint256 helperUint = 7777;
+        uint256 helperCount = 0;
         for(uint256 i = 0; i < selectednUmbersUpperLimit; i++) {
-            uint256 number = (uint256(keccak256(abi.encode(randomWord, i))) % totalNumbers) + 1;
+            helperCount++;
+            uint256 number;
+            number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao ))) % totalNumbers) + 1;
+            if(repeated) {
+                helperUint + i;
+                uint256 helper = uint256(keccak256(abi.encodePacked(block.timestamp, helperUint, block.prevrandao, helperCount)));
+                number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao, helper ))) % totalNumbers) + 1;
+            } 
             uint8 numberCast = uint8(number);
-            emit LogMessage(numberCast);
             if(!isNumberSelected(numberCast, transitSelectedNumbers)) {
                 transitSelectedNumbers[i] = uint8(number);
+                repeated = false;
             } else {
+                repeated = true;
                 i--;
             }
-            
         }
-        currentRaffle.selectedNumbers = transitSelectedNumbers;
-        currentRaffle.resultsAnnounced = true;
+        currentLottery.selectedNumbers = transitSelectedNumbers;
+        currentLottery.resultsAnnounced = true;
+        lotterys.push(currentLottery);
     }
 
     function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) pure internal returns(bool) {
@@ -210,7 +218,15 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     function getSelectedNumbers() public view returns(uint8[] memory) {
-        return currentRaffle.selectedNumbers;
+        uint256 counter = lotterys.length;
+        require(counter > 0, "There are not previous results yet");
+        if(counter == 1) {
+            return lotterys[0].selectedNumbers;
+        } else {
+            return lotterys[counter - 2].selectedNumbers;
+        }
+        
+
     }
 
     //AUTOMATION LOGIC
@@ -239,17 +255,17 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         override 
         returns(bool upkeepNeeded, bytes memory)
     {
-        bool raffleTicketsCheck = currentRaffleTicketsId.length > 0;
+        bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
         // bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
-        upkeepNeeded = raffleTicketsCheck /*&& timestampCheck*/;
+        upkeepNeeded = lotteryTicketsCheck /*&& timestampCheck*/;
         return (upkeepNeeded,abi.encode("0x"));
     }
 
     function performUpkeep(bytes calldata) /*chainlinkAddress*/ external override {
 
-        bool raffleTicketsCheck = currentRaffleTicketsId.length > 0;
+        bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
         // bool timestampCheck = (block.timestamp - lastTimeStamp) > interval;
-        bool upkeepNeeded = raffleTicketsCheck /*&& timestampCheck*/;
+        bool upkeepNeeded = lotteryTicketsCheck /*&& timestampCheck*/;
 
         if(upkeepNeeded) {
             lastTimeStamp = block.timestamp;
@@ -257,10 +273,17 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             //This shouldn't be called on testnet, only locally
             COORDINATOR_INSTANCE.fulfillRandomWords(requestId, address(this));
             randomize(s_randomWords[0]);
-            delete currentRaffleTicketsId;
+            delete currentLotteryTicketsId;
+            uint256 counter = lotterys.length;
+            currentLottery = Lottery({
+                lotteryId: counter + 1,
+                selectedNumbers: new uint8[](0),
+                resultsAnnounced: false
+            });
+            
 
         } else {
-            revert("Not ready to trigger a raffle");
+            revert("Not ready to trigger a lottery");
         }
     }
 
