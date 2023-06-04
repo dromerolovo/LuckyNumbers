@@ -1,13 +1,13 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
+import './MagicNumbers.sol';
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
 import "hardhat/console.sol";
 
-contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
+contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
     VRFCoordinatorV2Interface immutable COORDINATOR;
     VRFCoordinatorV2Mock immutable COORDINATOR_INSTANCE;
 
@@ -58,7 +58,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
 
     //VRF LOGIC
 
-    function requestRandomWords() internal onlyOwner returns (uint256 requestId){
+    function requestRandomWords() public onlyOwner returns (uint256 requestId){
         s_requestId = COORDINATOR.requestRandomWords(
             s_keyHash,
             s_subscriptionId,
@@ -179,7 +179,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         emit TicketPriceModified(ticketPrice);
     }
 
-    function calculateRightGuesses(uint256 ticketId) internal view returns(uint8) {
+    function calculateRightGuesses(uint256 ticketId) public view returns(uint8) {
         uint8[] memory selectedNumbersUser = ticketsIndex[ticketId].selectedNumbers;
         uint8[] memory selectedNumbersLottery = lotteries[ticketsIndex[ticketId].lotteryId].selectedNumbers;
         bool[80] memory set;
@@ -290,7 +290,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         _;
     }
 
-    function triggerLottery(uint256 randomWord) internal virtual {
+    function triggerLottery(uint256 randomWord) public virtual {
         uint8[] memory transitSelectedNumbers = new uint8[](20);
         bool repeated;
         //Lucky number 7 is arbitrary.
@@ -315,15 +315,15 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             }
         }
         setLottery(transitSelectedNumbers, true);
+    }
+
+    function setLottery(uint8[] memory selectedNumbers_, bool result) public virtual {
+        currentLottery.selectedNumbers = selectedNumbers_;
+        currentLottery.resultsAnnounced = result;
         lotteries[currentLottery.lotteryId] = currentLottery;
     }
 
-    function setLottery(uint8[] memory selectedNumbers_, bool result) internal virtual {
-        currentLottery.selectedNumbers = selectedNumbers_;
-        currentLottery.resultsAnnounced = result;
-    }
-
-    function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) pure internal returns(bool) {
+    function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) pure public returns(bool) {
         for(uint i = 0; i < transitSelectedNumbers.length; i++) {
             if(transitSelectedNumbers[i] == number) {
                 return true;

@@ -2566,7 +2566,7 @@
     "@scure/bip32" "1.1.5"
     "@scure/bip39" "1.1.1"
 
-"ethereum-waffle@*":
+"ethereum-waffle@*", "ethereum-waffle@^4.0.10":
   "integrity" "sha512-iw9z1otq7qNkGDNcMoeNeLIATF9yKl1M8AIeu42ElfNBplq0e+5PeasQmm8ybY/elkZ1XyRO0JBQxQdVRb8bqQ=="
   "resolved" "https://registry.npmjs.org/ethereum-waffle/-/ethereum-waffle-4.0.10.tgz"
   "version" "4.0.10"

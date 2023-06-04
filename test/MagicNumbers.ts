@@ -2,18 +2,23 @@ import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { assert } from "console";
 import helpers from "hardhat";
-import { ethers } from "hardhat";
+import { ethers, waffle } from "hardhat";
 import { MagicNumbers, MagicNumbers__factory, VRFCoordinatorV2Mock__factory } from "../typechain-types";
-import { VRFCoordinatorV2Mock } from "../typechain-types/contracts/VRFMock.sol";
+import { VRFCoordinatorV2Mock } from "../typechain-types/@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock";
 import { exec } from "child_process";
-import { BigNumber } from "ethers";
+import { BigNumber, providers } from "ethers";
 import "./utils";
-import { areAllElementsUnique, delay } from "./utils";
+import { areAllElementsUnique, delay} from "./utils";
 import {mine, takeSnapshot, time } from "@nomicfoundation/hardhat-network-helpers";
 import { getNetwork } from "@ethersproject/providers";
 import {} from "@nomiclabs/hardhat-waffle";
+import { deployMockContract, MockProvider } from "ethereum-waffle";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { increase, increaseTo, latest, latestBlock } from "@nomicfoundation/hardhat-network-helpers/dist/src/helpers/time";
+import path from "path";
+import fs from "fs";
+
+
 
 describe("MagicNumbers Test", async function() {
 
@@ -89,21 +94,21 @@ describe("MagicNumbers Test", async function() {
 
         it("Ticket buy action works correctly", async function() {
             const signerAddress = await ethers.provider.getSigner().getAddress();
-            const transaction = await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
-            const ticketsIds = transaction.events![0].args![0];
-            let count : number = 1;
-            for(let i in ticketsIds) {
-                expect((ticketsIds[i] as BigNumber).toNumber()).to.equal(count);
-                expect(JSON.stringify(await magicNumbers.getSelectedNumbersTicket(ticketsIds[i]))).to.equal(JSON.stringify(userSelectedNumbers));
-                count++;
+            const transaction = await (await magicNumbers.buyTicket(2, userSelectedNumbers, {value: ticketPrice.mul(2)})).wait();
+            const ticketsIds = transaction.events![0].args![0]
+            for(var i = 0; i < ticketsIds.length; i++) {
+                var id = ticketsIds[i].toNumber();
+                var ticket = await magicNumbers.getTicket(id);
+                expect(JSON.stringify(ticket.selectedNumbers)).to.equal(JSON.stringify(userSelectedNumbers));
             }
+
         })
         it("Trigger the lottery", async function() {
             await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
             await time.setNextBlockTimestamp(await latest() + 1000);
             await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
             var ticketsTop = magicNumbers.getSelectedNumbers();
-            expect((await ticketsTop).length).to.be.equal(10);
+            expect((await ticketsTop).length).to.be.equal(20);
             for(var i = 0; i < 10; i++) {
                 await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
                 await time.setNextBlockTimestamp(await latest() + 1000);
@@ -113,6 +118,21 @@ describe("MagicNumbers Test", async function() {
                 
             }
         });
+
+        it("Get tickets bought", async function() {
+            var firstArray = [1, 2, 3, 4, 5];
+            var secondArray = [1, 5, 6, 7, 9];
+            var thirdArray = [2, 8, 9, 7, 10];
+            var arrays = [firstArray, secondArray, thirdArray];
+            for(var i = 0; i < arrays.length; i++) {
+                await magicNumbers.buyTicket(1, arrays[i], {value: ticketPrice});
+            }
+
+            var ticketsBought = await magicNumbers.getTicketsBought()
+            expect(ticketsBought.length).to.be.equal(3);
+            expect(JSON.stringify(ticketsBought[0].selectedNumbers)).to.be.equal(JSON.stringify(firstArray));
+
+        })
     });
 });
 
