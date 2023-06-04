@@ -116,6 +116,7 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
         bool isItRedeemed;
         uint256 lotteryId;
         uint8[] selectedNumbers;
+        address owner;
     }
 
     function populatePrizeTable() private {
@@ -209,19 +210,22 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
         return (multiplier, prizeInEth);
     }
 
-    function claimPrize(uint256 ticketId) ticketClaimabilityChecker(ticketId) public {
+    function claimPrize(uint256 ticketId) ticketClaimabilityChecker(ticketId) external {
          (uint256 m, uint256 prizeInEth) = calculatePrize(ticketId);
-         //If everything is correct, this shouldn't be called. Never.
+         // This code block is intended as a failsafe and should ideally never be triggered ;)
          if(address(this).balance < prizeInEth) {
-            revert("Insufficient amount of eth stored in the contract");
+            prizeInEth = address(this).balance;
          }
          ticketsIndex[ticketId].isItRedeemed = true;
          payable (msg.sender).transfer(prizeInEth);
     }
 
     modifier ticketClaimabilityChecker(uint256 ticketId) virtual {
+        if(ticketsIndex[ticketId].owner != msg.sender) {
+            revert("Ticket prize should be claimed by the owner of the ticket");
+        }
         uint256 lotteryId = ticketsIndex[ticketId].lotteryId;
-        if(!(lotteries[lotteryId].resultsAnnounced == false) && !(lotteries[lotteryId].selectedNumbers.length > 0)) {
+        if(lotteries[lotteryId].resultsAnnounced == false) {
             revert("The lottery results have not been announced.");
         }
 
@@ -250,7 +254,8 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
                 ticketId: ticketCounter,
                 isItRedeemed: false,
                 lotteryId: currentLottery.lotteryId,
-                selectedNumbers: selectedNumbersFixed
+                selectedNumbers: selectedNumbersFixed,
+                owner: msg.sender
             });
             tickets[msg.sender].push(ticket);
             currentLotteryTicketsId.push(ticket.ticketId);
