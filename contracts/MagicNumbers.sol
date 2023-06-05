@@ -47,14 +47,19 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
 
+    receive() external payable {
+
+    }
+
     modifier onlyOwner() {
         require(msg.sender == s_owner);
         _;
     }
 
-    function getContractValue() onlyOwner external view returns(uint) {
+    function getContractValue()  external view onlyOwner returns(uint) {
         return address(this).balance;
     }
+
 
     //VRF LOGIC
 
@@ -90,7 +95,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
 
     uint256 public s_ticketPrice; 
     Lottery public s_currentLottery;
-    uint256[] private currentLotteryTicketsId; //Check if this can be removed
+    uint256[] private currentLotteryTicketsId;
     mapping(uint256 => Lottery) public s_lotteries;
     mapping (address => Ticket[]) public s_tickets;
     mapping(uint256 => Ticket) public ticketsIndex;
@@ -100,15 +105,8 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     uint256 public s_ticketCap;
     uint8 public constant SELECTED_NUMBERS_UPPER_LIMIT_LOTTERY = 20;
     uint8 public constant SELECTED_NUMBERS_UPPER_LIMIT_USER = 10;
-
     //[hits or right guesses][selected numbers count] 
     uint32[11][11] private s_prizeTable;
-
-    event TicketBought(uint256[] ticket);
-    event TicketCapModified(uint256 ticketCap);
-    event TicketPriceModified(uint256 ticketPrice);
-    event LotteryCreated(Lottery lottery);
-    event LogMessage(string message);
 
     struct Lottery {
         uint256 lotteryId;
@@ -122,6 +120,191 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         uint256 lotteryId;
         uint8[] selectedNumbers;
         address owner;
+    }
+
+    event TicketBought(uint256[] ticket);
+    event TicketCapModified(uint256 ticketCap);
+    event TicketPriceModified(uint256 ticketPrice);
+    event LotteryCreated(Lottery lottery);
+
+    modifier ticketClaimabilityChecker(uint256 ticketId) {
+        if(ticketsIndex[ticketId].owner != msg.sender) {
+            revert("Ticket prize should be claimed by the owner of the ticket");
+        }
+        uint256 lotteryId = ticketsIndex[ticketId].lotteryId;
+        if(s_lotteries[lotteryId].resultsAnnounced == false) {
+            revert("The lottery results have not been announced.");
+        }
+
+        if(ticketsIndex[ticketId].isItRedeemed == true) {
+            revert("Ticket has already been redeemed");
+        }
+        _;
+    }
+
+    modifier ceilingCheck(uint8[] calldata selectedNumbers) {
+        for(uint256 i = 0; i < selectedNumbers.length; i++) {
+            require(selectedNumbers[i] <= s_numberCeiling, "Numbers must not exceed the ceiling");
+        }
+        _;
+    }
+
+    modifier uniqueArrayCheck(uint8[] calldata selectedNumbers) {
+        uint length = selectedNumbers.length;
+        bool[] memory encountered = new bool[](length);
+        for(uint i = 0; i < length; i++) {
+            for(uint j = i + 1; j < length; j++) {
+                if(selectedNumbers[i] == selectedNumbers[j]) {
+                    revert("Values should be unique");
+                }
+            }
+        }
+        _;
+    }
+
+    function modifyTicketsCap(uint256 ticketCap)  external onlyOwner  {
+        s_ticketCap = ticketCap;
+        emit TicketCapModified(s_ticketCap);
+    }
+
+    function modifyTicketPrice(uint256 newPrice)  external onlyOwner {
+        s_ticketPrice = newPrice;
+        emit TicketPriceModified(s_ticketPrice);
+    }
+
+    function getTicketsBought() external view returns(Ticket[] memory) {
+        Ticket[] memory ticketsMemory = s_tickets[msg.sender];
+        return ticketsMemory;
+    }
+
+    function getTicket(uint256 ticketId) external view returns(Ticket memory) {
+        Ticket memory ticketMemory = ticketsIndex[ticketId];
+        return ticketMemory;
+    }
+
+    function claimPrize(uint256 ticketId) ticketClaimabilityChecker(ticketId) external virtual {
+        (uint256 m, uint256 prizeInEth) = calculatePrize(ticketId);
+        // This code block is intended as a failsafe and should ideally never be triggered ;)
+        if(address(this).balance < prizeInEth) {
+        prizeInEth = address(this).balance;
+        }
+        ticketsIndex[ticketId].isItRedeemed = true;
+        payable (msg.sender).transfer(prizeInEth);
+    }
+
+    function buyTicket(uint32 numTickets, uint8[] calldata selectedNumbers) 
+        external 
+        payable 
+        virtual
+        ceilingCheck(selectedNumbers) 
+        uniqueArrayCheck(selectedNumbers)
+        {
+        require(msg.value >= s_ticketPrice * numTickets, "Insufficient Ether sent");
+        require(numTickets < s_ticketCap, "Tickets bought must not exceed the max amount or cap");
+        require(selectedNumbers.length <= SELECTED_NUMBERS_UPPER_LIMIT_USER, "Selected numbers must be equal or less than 10");
+        require(s_currentLottery.resultsAnnounced == false, "The lottery should not be concluded");
+        require(s_currentLottery.selectedNumbers.length == 0, "The lottery should not be concluded");
+
+        uint256[] memory ticketsIds = new uint256[](numTickets);
+        uint8[] memory selectedNumbersFixed = selectedNumbers;
+        
+        for(uint256 i = 0; i < numTickets; i++) {
+            s_ticketCounter += 1;
+            Ticket memory ticket = Ticket({
+                ticketId: s_ticketCounter,
+                isItRedeemed: false,
+                lotteryId: s_currentLottery.lotteryId,
+                selectedNumbers: selectedNumbersFixed,
+                owner: msg.sender
+            });
+            s_tickets[msg.sender].push(ticket);
+            currentLotteryTicketsId.push(ticket.ticketId);
+            ticketsIds[i] = s_ticketCounter;
+            ticketsIndex[s_ticketCounter] = ticket;
+        }        
+        emit TicketBought(ticketsIds);
+    }
+
+    function calculatePrize(uint256 ticketId) public view virtual returns(uint32, uint256) {
+        uint selectedNumbersCount = ticketsIndex[ticketId].selectedNumbers.length;
+        uint8 count = calculateRightGuesses(ticketId);
+        if(count == 0) {
+            revert("There are not Right guesses. So there are no avilable claimable prizes");
+        }
+        uint32 multiplier = s_prizeTable[count][selectedNumbersCount];
+        uint256 prizeInEth = 20000000000000000  * uint256(multiplier);
+        return (multiplier, prizeInEth);
+    }
+
+    function getSelectedNumbers() public view returns(uint8[] memory) {
+        require(s_lotteryCounter > 0, "There are not previous results yet");
+        if(s_lotteryCounter == 1) {
+            return s_lotteries[0].selectedNumbers;
+        } else {
+            return s_lotteries[s_lotteryCounter - 2].selectedNumbers;
+        }
+    }
+
+        function calculateRightGuesses(uint256 ticketId) internal view virtual returns(uint8) {
+        uint8[] memory selectedNumbersUser = ticketsIndex[ticketId].selectedNumbers;
+        uint8[] memory selectedNumbersLottery = s_lotteries[ticketsIndex[ticketId].lotteryId].selectedNumbers;
+        bool[80] memory set;
+
+        for(uint8 i = 0; i < selectedNumbersUser.length; i++) {
+            set[selectedNumbersUser[i]] = true;
+        }
+
+        uint8 rightGuesses = 0;
+        for(uint8 i = 0; i < selectedNumbersLottery.length; i++) {
+            if(set[selectedNumbersLottery[i]]) {
+                rightGuesses++;
+            }
+        }
+
+        return rightGuesses;
+    }
+
+    function triggerLottery(uint256 randomWord) internal virtual {
+        uint8[] memory transitSelectedNumbers = new uint8[](20);
+        bool repeated;
+        //Lucky number 7 is arbitrary.
+        uint256 helperUint = 7777;
+        uint256 helperCount = 0;
+        for(uint256 i = 0; i < SELECTED_NUMBERS_UPPER_LIMIT_LOTTERY; i++) {
+            helperCount++;
+            uint256 number;
+            number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao ))) % s_numberCeiling) + 1;
+            if(repeated) {
+                helperUint + i;
+                uint256 helper = uint256(keccak256(abi.encodePacked(block.timestamp, helperUint, block.prevrandao, helperCount)));
+                number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao, helper ))) % s_numberCeiling) + 1;
+            } 
+            uint8 numberCast = uint8(number);
+            if(!isNumberSelected(numberCast, transitSelectedNumbers)) {
+                transitSelectedNumbers[i] = uint8(number);
+                repeated = false;
+            } else {
+                repeated = true;
+                i--;
+            }
+        }
+        setLottery(transitSelectedNumbers, true);
+        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+    }
+
+    function setLottery(uint8[] memory selectedNumbers, bool result) internal virtual {
+        s_currentLottery.selectedNumbers = selectedNumbers;
+        s_currentLottery.resultsAnnounced = result;
+    }
+
+    function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) internal pure returns(bool) {
+        for(uint i = 0; i < transitSelectedNumbers.length; i++) {
+            if(transitSelectedNumbers[i] == number) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     function populatePrizeTable() private {
@@ -175,183 +358,6 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         s_prizeTable[10][10] = 100000;
     }
 
-    function modifyTicketsCap(uint256 ticketCap) onlyOwner external  {
-        s_ticketCap = ticketCap;
-        emit TicketCapModified(s_ticketCap);
-    }
-
-    function modifyTicketPrice(uint256 newPrice) onlyOwner external {
-        s_ticketPrice = newPrice;
-        emit TicketPriceModified(s_ticketPrice);
-    }
-
-    function calculateRightGuesses(uint256 ticketId) internal view virtual returns(uint8) {
-        uint8[] memory selectedNumbersUser = ticketsIndex[ticketId].selectedNumbers;
-        uint8[] memory selectedNumbersLottery = s_lotteries[ticketsIndex[ticketId].lotteryId].selectedNumbers;
-        bool[80] memory set;
-
-        for(uint8 i = 0; i < selectedNumbersUser.length; i++) {
-            set[selectedNumbersUser[i]] = true;
-        }
-
-        uint8 rightGuesses = 0;
-        for(uint8 i = 0; i < selectedNumbersLottery.length; i++) {
-            if(set[selectedNumbersLottery[i]]) {
-                rightGuesses++;
-            }
-        }
-
-        return rightGuesses;
-    }
-
-    function calculatePrize(uint256 ticketId) public view virtual returns(uint32, uint256) {
-        uint selectedNumbersCount = ticketsIndex[ticketId].selectedNumbers.length;
-        uint8 count = calculateRightGuesses(ticketId);
-        if(count == 0) {
-            revert("There are not Right guesses. So there are no avilable claimable prizes");
-        }
-        uint32 multiplier = s_prizeTable[count][selectedNumbersCount];
-        uint256 prizeInEth = 20000000000000000  * uint256(multiplier);
-        return (multiplier, prizeInEth);
-    }
-
-    function claimPrize(uint256 ticketId) ticketClaimabilityChecker(ticketId) external virtual {
-         (uint256 m, uint256 prizeInEth) = calculatePrize(ticketId);
-         // This code block is intended as a failsafe and should ideally never be triggered ;)
-         if(address(this).balance < prizeInEth) {
-            prizeInEth = address(this).balance;
-         }
-         ticketsIndex[ticketId].isItRedeemed = true;
-         payable (msg.sender).transfer(prizeInEth);
-    }
-
-    modifier ticketClaimabilityChecker(uint256 ticketId) virtual {
-        if(ticketsIndex[ticketId].owner != msg.sender) {
-            revert("Ticket prize should be claimed by the owner of the ticket");
-        }
-        uint256 lotteryId = ticketsIndex[ticketId].lotteryId;
-        if(s_lotteries[lotteryId].resultsAnnounced == false) {
-            revert("The lottery results have not been announced.");
-        }
-
-        if(ticketsIndex[ticketId].isItRedeemed == true) {
-            revert("Ticket has already been redeemed");
-        }
-        _;
-    }
-
-    function buyTicket(uint32 numTickets, uint8[] calldata selectedNumbers) 
-        ceilingCheck(selectedNumbers) 
-        uniqueArrayCheck(selectedNumbers)
-        external payable virtual{
-        require(msg.value >= s_ticketPrice * numTickets, "Insufficient Ether sent");
-        require(numTickets < s_ticketCap, "Tickets bought must not exceed the max amount or cap");
-        require(selectedNumbers.length <= SELECTED_NUMBERS_UPPER_LIMIT_USER, "Selected numbers must be equal or less than 10");
-        require(s_currentLottery.resultsAnnounced == false, "The lottery should not be concluded");
-        require(s_currentLottery.selectedNumbers.length == 0, "The lottery should not be concluded");
-
-        uint256[] memory ticketsIds = new uint256[](numTickets);
-        uint8[] memory selectedNumbersFixed = selectedNumbers;
-        
-        for(uint256 i = 0; i < numTickets; i++) {
-            s_ticketCounter += 1;
-            Ticket memory ticket = Ticket({
-                ticketId: s_ticketCounter,
-                isItRedeemed: false,
-                lotteryId: s_currentLottery.lotteryId,
-                selectedNumbers: selectedNumbersFixed,
-                owner: msg.sender
-            });
-            s_tickets[msg.sender].push(ticket);
-            currentLotteryTicketsId.push(ticket.ticketId);
-            ticketsIds[i] = s_ticketCounter;
-            ticketsIndex[s_ticketCounter] = ticket;
-        }        
-        emit TicketBought(ticketsIds);
-    }
-
-    function getTicketsBought() external view returns(Ticket[] memory) {
-        Ticket[] memory ticketsMemory = s_tickets[msg.sender];
-        return ticketsMemory;
-    }
-
-    function getTicket(uint256 ticketId) external view returns(Ticket memory) {
-        Ticket memory ticketMemory = ticketsIndex[ticketId];
-        return ticketMemory;
-    }
-
-    modifier ceilingCheck(uint8[] calldata selectedNumbers) virtual {
-        for(uint256 i = 0; i < selectedNumbers.length; i++) {
-            require(selectedNumbers[i] <= s_numberCeiling, "Numbers must not exceed the ceiling");
-        }
-        _;
-    }
-
-    modifier uniqueArrayCheck(uint8[] calldata selectedNumbers) virtual {
-        uint length = selectedNumbers.length;
-        bool[] memory encountered = new bool[](length);
-        for(uint i = 0; i < length; i++) {
-            for(uint j = i + 1; j < length; j++) {
-                if(selectedNumbers[i] == selectedNumbers[j]) {
-                    revert("Values should be unique");
-                }
-            }
-        }
-        _;
-    }
-
-    function triggerLottery(uint256 randomWord) internal virtual {
-        uint8[] memory transitSelectedNumbers = new uint8[](20);
-        bool repeated;
-        //Lucky number 7 is arbitrary.
-        uint256 helperUint = 7777;
-        uint256 helperCount = 0;
-        for(uint256 i = 0; i < SELECTED_NUMBERS_UPPER_LIMIT_LOTTERY; i++) {
-            helperCount++;
-            uint256 number;
-            number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao ))) % s_numberCeiling) + 1;
-            if(repeated) {
-                helperUint + i;
-                uint256 helper = uint256(keccak256(abi.encodePacked(block.timestamp, helperUint, block.prevrandao, helperCount)));
-                number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao, helper ))) % s_numberCeiling) + 1;
-            } 
-            uint8 numberCast = uint8(number);
-            if(!isNumberSelected(numberCast, transitSelectedNumbers)) {
-                transitSelectedNumbers[i] = uint8(number);
-                repeated = false;
-            } else {
-                repeated = true;
-                i--;
-            }
-        }
-        setLottery(transitSelectedNumbers, true);
-        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
-    }
-
-    function setLottery(uint8[] memory selectedNumbers, bool result) internal virtual {
-        s_currentLottery.selectedNumbers = selectedNumbers;
-        s_currentLottery.resultsAnnounced = result;
-    }
-
-    function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) pure internal returns(bool) {
-        for(uint i = 0; i < transitSelectedNumbers.length; i++) {
-            if(transitSelectedNumbers[i] == number) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    function getSelectedNumbers() public view returns(uint8[] memory) {
-        require(s_lotteryCounter > 0, "There are not previous results yet");
-        if(s_lotteryCounter == 1) {
-            return s_lotteries[0].selectedNumbers;
-        } else {
-            return s_lotteries[s_lotteryCounter - 2].selectedNumbers;
-        }
-    }
-
     //AUTOMATION LOGIC
 
     address public s_automationAddress;
@@ -363,19 +369,19 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         _;
     }
 
-    function changeAddress(address automationAddress) onlyOwner external {
+    function changeAddress(address automationAddress) external onlyOwner {
         s_automationAddress = automationAddress;
     }
 
-    function changeInterval(uint256 interval) onlyOwner external {
+    function changeInterval(uint256 interval) external onlyOwner {
         s_interval = interval;
     }
 
     function checkUpkeep(bytes calldata)
-        chainlinkAddress
         external 
         view 
         override 
+        chainlinkAddress
         returns(bool upkeepNeeded, bytes memory)
     {
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
@@ -384,7 +390,11 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         return (upkeepNeeded,abi.encode("0x"));
     }
 
-    function performUpkeep(bytes calldata) chainlinkAddress external override {
+    function performUpkeep(bytes calldata) 
+        external 
+        override 
+        chainlinkAddress
+    {
 
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
         bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;

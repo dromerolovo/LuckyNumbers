@@ -57,10 +57,6 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
 
-    receive() external payable {
-
-    }
-
     modifier onlyOwner() {
         require(msg.sender == s_owner);
         _;
