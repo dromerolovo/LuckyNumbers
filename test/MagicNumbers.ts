@@ -103,22 +103,6 @@ describe("MagicNumbers Test", async function() {
             }
 
         })
-        it("Trigger the lottery", async function() {
-            await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
-            await time.setNextBlockTimestamp(await latest() + 1000);
-            await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
-            var ticketsTop = magicNumbers.getSelectedNumbers();
-            expect((await ticketsTop).length).to.be.equal(20);
-            for(var i = 0; i < 10; i++) {
-                await (await magicNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
-                await time.setNextBlockTimestamp(await latest() + 1000);
-                await magicNumbers.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
-                var tickets = magicNumbers.getSelectedNumbers();
-                expect(areAllElementsUnique(await tickets)).to.be.true;
-                
-            }
-        });
-
         it("Get tickets bought", async function() {
             var firstArray = [1, 2, 3, 4, 5];
             var secondArray = [1, 5, 6, 7, 9];

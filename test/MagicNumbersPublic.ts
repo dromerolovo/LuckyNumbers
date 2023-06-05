@@ -8,6 +8,7 @@ import { expect } from "chai";
 import {time } from "@nomicfoundation/hardhat-network-helpers";
 import { latest } from "@nomicfoundation/hardhat-network-helpers/dist/src/helpers/time";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { areAllElementsUnique } from "./utils";
 
 describe("MagicNumberTesting test", async function() {
 
@@ -23,10 +24,11 @@ describe("MagicNumberTesting test", async function() {
     let ownerAddr : SignerWithAddress;
     let addr1 : SignerWithAddress;
     let addr2 : SignerWithAddress;
+    let addr3 : SignerWithAddress;
 
     this.beforeAll(async function() {
 
-        [ownerAddr, addr1, addr2] = await ethers.getSigners();
+        [ownerAddr, addr1, addr2, addr3] = await ethers.getSigners();
 
         const baseFee = ethers.utils.parseEther("0.1");
         const gasPriceLink = ethers.utils.parseEther("0.000000001");
@@ -50,10 +52,37 @@ describe("MagicNumberTesting test", async function() {
         await magicNumbersPublic.deployed();
         magicNumbersPublicAddress = magicNumbersPublic.address;
 
+        const requiredBalance = ethers.utils.parseEther("5000");
+        const transaction = await addr3.sendTransaction({
+            to: magicNumbersPublic.address,
+            value: requiredBalance,
+            gasLimit: 300000
+        });
+
+        await transaction.wait();
+
         vrfMock.addConsumer(subscriptionId, magicNumbersPublicAddress);
     });
 
     describe("Test internal functions", function() {
+
+        it("Trigger the lottery", async function() {
+            const userSelectedNumbers = [1, 2, 3, 4, 5, 6, 7]
+            await (await magicNumbersPublic.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+            await time.setNextBlockTimestamp(await latest() + 1000);
+            await magicNumbersPublic.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
+            var ticketsTop = magicNumbersPublic.getSelectedNumbers();
+            expect((await ticketsTop).length).to.be.equal(20);
+            for(var i = 0; i < 10; i++) {
+                await (await magicNumbersPublic.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+                await time.setNextBlockTimestamp(await latest() + 1000);
+                await magicNumbersPublic.performUpkeep(ethers.utils.hexlify('0x'), {gasLimit: 6000000});
+                var tickets = magicNumbersPublic.getSelectedNumbers();
+                expect(areAllElementsUnique(await tickets)).to.be.true;
+                
+            }
+        });
+
         it("Displaying prizes", async function() {
             var userSelectedNumbers = [1, 2, 3, 4, 78]
             const transaction = await (await magicNumbersPublic.connect(ownerAddr).buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
@@ -92,7 +121,6 @@ describe("MagicNumberTesting test", async function() {
             var userSelectedNumbers = [1, 2, 3, 4, 78];
             const transaction = await (await magicNumbersPublic.connect(ownerAddr).buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
             var ticketId = transaction.events![0].args![0][0].toNumber();
-            console.log(await magicNumbersPublic.currentLottery());
             await expect(magicNumbersPublic.claimPrize(ticketId)).to.be.revertedWith("The lottery results have not been announced.");
         });
 
@@ -105,6 +133,22 @@ describe("MagicNumberTesting test", async function() {
             await magicNumbersPublic.setLottery(Array.from({length: 20}, (_, index) => index + 1), true);
             await magicNumbersPublic.claimPrize(ticketId);
             await expect(magicNumbersPublic.claimPrize(ticketId)).to.be.revertedWith("Ticket has already been redeemed");
+        });
+
+        it("Test Claim prize",async function() {
+            await time.setNextBlockTimestamp(await latest() + 1000);
+            await magicNumbersPublic.performUpkeep(ethers.utils.hexlify('0x'));
+            var userSelectedNumbers = [1, 2, 3, 4, 78];
+            const transaction = await (await magicNumbersPublic.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+            var ticketId = transaction.events![0].args![0][0].toNumber();
+            await magicNumbersPublic.setLottery(Array.from({length: 20}, (_, index) => index + 1), true);
+            var preContractValue = await magicNumbersPublic.getContractValue();
+            var preBalanceAddress = await ownerAddr.getBalance();
+            var calculatePrize = (await magicNumbersPublic.calculatePrize(ticketId))[1];
+            var transactionClaim = (await magicNumbersPublic.claimPrize(ticketId)).wait();
+            var gasUsed = (await transactionClaim).gasUsed.mul((await transactionClaim).effectiveGasPrice);
+            expect(await magicNumbersPublic.getContractValue()).to.be.equal(preContractValue.sub(calculatePrize));
+            expect(await ownerAddr.getBalance()).to.be.equal(preBalanceAddress.add(calculatePrize).sub(gasUsed));
         });
     });
 }); 

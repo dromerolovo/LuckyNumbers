@@ -1,3 +1,13 @@
+// SPDX-License-Identifier: MIT
+
+//Replace internal with public everythere except for the case of the function fulfillRandomWords.
+// Move the triggerLottery function to performUpkeep, also all the side effects. 
+// Use setLottery directly to set the selectedNumbers.
+// Remove chainlinkAddress modifier
+
+//COPY THE CONTRACT BELOW THIS LINE:
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+
 pragma solidity ^0.8.9;
 
 import './MagicNumbers.sol';
@@ -46,6 +56,10 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
+
+    receive() external payable {
+
+    }
 
     modifier onlyOwner() {
         require(msg.sender == s_owner);
