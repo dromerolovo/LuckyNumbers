@@ -6,7 +6,7 @@
 // Remove chainlinkAddress modifier
 
 //COPY THE CONTRACT BELOW THIS LINE:
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~//
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 pragma solidity ^0.8.9;
 
@@ -56,6 +56,10 @@ contract MagicNumbersPublic is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     //TOP-LEVEL MODIFIERS / FUNCTIONS / VARIABLES
+
+    receive() external payable {
+
+    }
 
     modifier onlyOwner() {
         require(msg.sender == s_owner);

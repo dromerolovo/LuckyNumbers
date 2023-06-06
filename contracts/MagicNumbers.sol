@@ -6,7 +6,6 @@ import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
 import "hardhat/console.sol";
-
 contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     VRFCoordinatorV2Interface immutable COORDINATOR;
     VRFCoordinatorV2Mock immutable COORDINATOR_INSTANCE;
@@ -37,8 +36,9 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         s_numberCeiling = numberCeiling;
         s_lastTimeStamp = block.timestamp;
         s_ticketCap = 10;
+        s_lotteryCounter++;
         s_currentLottery = Lottery({
-            lotteryId: 0,
+            lotteryId: s_lotteryCounter,
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
@@ -142,6 +142,14 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         _;
     }
 
+    modifier checkLotteryResultsAnnounced(uint256 ticketId) {
+        uint256 lotteryId = ticketsIndex[ticketId].lotteryId;
+        if(s_lotteries[lotteryId].resultsAnnounced == false) {
+            revert("The lottery results have not been announced.");
+        }
+        _;
+    }
+
     modifier ceilingCheck(uint8[] calldata selectedNumbers) {
         for(uint256 i = 0; i < selectedNumbers.length; i++) {
             require(selectedNumbers[i] <= s_numberCeiling, "Numbers must not exceed the ceiling");
@@ -184,6 +192,9 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
 
     function claimPrize(uint256 ticketId) ticketClaimabilityChecker(ticketId) external virtual {
         (uint256 m, uint256 prizeInEth) = calculatePrize(ticketId);
+        if(m == 0 || prizeInEth == 0) {
+            revert("There are no claimable prize");
+        }
         // This code block is intended as a failsafe and should ideally never be triggered ;)
         if(address(this).balance < prizeInEth) {
         prizeInEth = address(this).balance;
@@ -198,7 +209,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         virtual
         ceilingCheck(selectedNumbers) 
         uniqueArrayCheck(selectedNumbers)
-        {
+    {
         require(msg.value >= s_ticketPrice * numTickets, "Insufficient Ether sent");
         require(numTickets < s_ticketCap, "Tickets bought must not exceed the max amount or cap");
         require(selectedNumbers.length <= SELECTED_NUMBERS_UPPER_LIMIT_USER, "Selected numbers must be equal or less than 10");
@@ -225,27 +236,33 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         emit TicketBought(ticketsIds);
     }
 
-    function calculatePrize(uint256 ticketId) public view virtual returns(uint32, uint256) {
+    function calculatePrize(uint256 ticketId) 
+        public 
+        view 
+        virtual 
+        checkLotteryResultsAnnounced(ticketId) 
+        returns(uint32, uint256) 
+    {
         uint selectedNumbersCount = ticketsIndex[ticketId].selectedNumbers.length;
         uint8 count = calculateRightGuesses(ticketId);
-        if(count == 0) {
-            revert("There are not Right guesses. So there are no avilable claimable prizes");
-        }
         uint32 multiplier = s_prizeTable[count][selectedNumbersCount];
-        uint256 prizeInEth = 20000000000000000  * uint256(multiplier);
+        uint256 prizeInEth = s_ticketPrice  * uint256(multiplier);
         return (multiplier, prizeInEth);
     }
 
     function getSelectedNumbers() public view returns(uint8[] memory) {
-        require(s_lotteryCounter > 0, "There are not previous results yet");
-        if(s_lotteryCounter == 1) {
-            return s_lotteries[0].selectedNumbers;
-        } else {
-            return s_lotteries[s_lotteryCounter - 2].selectedNumbers;
-        }
+        require(s_lotteryCounter > 1, "There are no previous results yet");
+        return s_lotteries[s_lotteryCounter - 1].selectedNumbers;
+
     }
 
-        function calculateRightGuesses(uint256 ticketId) internal view virtual returns(uint8) {
+    function calculateRightGuesses(uint256 ticketId) 
+        public 
+        view 
+        virtual 
+        checkLotteryResultsAnnounced(ticketId) 
+        returns(uint8) 
+    {
         uint8[] memory selectedNumbersUser = ticketsIndex[ticketId].selectedNumbers;
         uint8[] memory selectedNumbersLottery = s_lotteries[ticketsIndex[ticketId].lotteryId].selectedNumbers;
         bool[80] memory set;
@@ -369,7 +386,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         _;
     }
 
-    function changeAddress(address automationAddress) external onlyOwner {
+    function changeAutomationAddress(address automationAddress) external onlyOwner {
         s_automationAddress = automationAddress;
     }
 
@@ -407,5 +424,4 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             revert("Not ready to trigger a lottery");
         }
     }
-
 }
