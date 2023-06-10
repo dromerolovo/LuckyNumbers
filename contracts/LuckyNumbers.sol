@@ -5,8 +5,6 @@ import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 
-import "../node_modules/hardhat/console.sol";
-
 contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
     VRFCoordinatorV2Interface immutable COORDINATOR;
     uint64 immutable s_subscriptionId;
@@ -65,7 +63,7 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
 
     //VRF LOGIC
 
-    function requestRandomWords() internal onlyOwner returns (uint256 requestId){
+    function requestRandomWords() internal returns (uint256 requestId){
         s_requestId = COORDINATOR.requestRandomWords(
             s_keyHash,
             s_subscriptionId,
@@ -272,7 +270,7 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
         if(lotteryId == 0) {
             revert("Empty Lottery");
         }
-        
+
         if(s_lotteries[lotteryId].lotteryId == 0) {
             revert("This lottery has not been created yet");
         }
@@ -466,30 +464,29 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
     }
 
     ///DEBUGGING: USE ONLY FOR TESTING ON LOCAL ENVIROMENT,
-    function DEBUG_ONLY_setLottery(uint8[] memory selectedNumbers) public virtual {
-        s_currentLottery.selectedNumbers = selectedNumbers;
-        s_currentLottery.resultsAnnounced = true;
-        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
-        delete currentLotteryTicketsId;
-        s_lotteryCounter++;
-        s_currentLottery = Lottery({
-            lotteryId: s_lotteryCounter,
-            selectedNumbers: new uint8[](0),
-            resultsAnnounced: false
-        });
-        emit LotteryCreated(s_currentLottery.lotteryId);
-    }
+    // function DEBUG_ONLY_setLottery(uint8[] memory selectedNumbers) public virtual {
+    //     s_currentLottery.selectedNumbers = selectedNumbers;
+    //     s_currentLottery.resultsAnnounced = true;
+    //     s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+    //     delete currentLotteryTicketsId;
+    //     s_lotteryCounter++;
+    //     s_currentLottery = Lottery({
+    //         lotteryId: s_lotteryCounter,
+    //         selectedNumbers: new uint8[](0),
+    //         resultsAnnounced: false
+    //     });
+    //     emit LotteryCreated(s_currentLottery.lotteryId);
+    // }
 
-    function DEBUG_ONLY_performUpkeep(bytes calldata, uint8[] memory seletedNumbers) external {
-        bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
-        bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
-        bool check = lotteryTicketsCheck && timestampCheck;
+    // function DEBUG_ONLY_performUpkeep(bytes calldata, uint8[] memory seletedNumbers) external {
+    //     bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
+    //     bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
+    //     bool check = lotteryTicketsCheck && timestampCheck;
 
-        if(check) {
-            s_lastTimeStamp = block.timestamp;
-            DEBUG_ONLY_setLottery(seletedNumbers);
-        } else {
-            revert("Not ready to trigger a lottery");
-        }
+    //     if(check) {
+    //         s_lastTimeStamp = block.timestamp;
+    //         DEBUG_ONLY_setLottery(seletedNumbers);
+    //     } else {
+    //         revert("Not ready to trigger a lottery");
+    //     }
     }
-}
