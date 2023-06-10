@@ -1,36 +1,37 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.7;
 
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
-import "@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
-import "hardhat/console.sol";
-contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
-    VRFCoordinatorV2Interface immutable COORDINATOR;
-    VRFCoordinatorV2Mock immutable COORDINATOR_INSTANCE;
+import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 
+import "../node_modules/hardhat/console.sol";
+
+contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
+    VRFCoordinatorV2Interface immutable COORDINATOR;
     uint64 immutable s_subscriptionId;
     bytes32 immutable s_keyHash;
     uint32 constant CALLBACK_GAS_LIMIT = 1000000;
     uint16 constant REQUEST_CONFIRMATIONS = 3;
-    uint32 constant NUM_WORDS = 1;
+    // uint32 constant NUM_WORDS = 1;
+    uint32 constant NUM_WORDS = 20;
 
     uint256[] private s_randomWords;
     uint256 private s_requestId;
     address s_owner;
+    address payable s_opVault;
 
-    event ReturnedRandomness(uint256[] randomWords);
+    event ReturnedRandomness(uint256 indexed requestId);
 
     constructor(uint64 subscriptionId, address vrfCoordinator, bytes32 keyHash, uint256 ticketPrice, 
-        uint256 numberCeiling
+        uint256 numberCeiling, address payable opVault, uint256 timeInterval
     ) VRFConsumerBaseV2(vrfCoordinator) {
         require(numberCeiling < 256, "Ceiling should be less than 256");
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
-        COORDINATOR_INSTANCE = VRFCoordinatorV2Mock(vrfCoordinator);
         s_keyHash = keyHash;
         s_owner = msg.sender;
-        s_interval = 900; //15 minutes in Unix timestamp
+        s_opVault = opVault;
+        s_interval = timeInterval;
         s_subscriptionId = subscriptionId;
         s_ticketPrice = ticketPrice;
         s_numberCeiling = numberCeiling;
@@ -42,6 +43,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
+        emit LotteryCreated(s_currentLottery.lotteryId);
         populatePrizeTable();
     }
 
@@ -80,7 +82,8 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         uint256[] memory randomWords
     ) internal override {
         s_randomWords = randomWords;
-        triggerLottery(s_randomWords[0]);
+        // triggerLottery(s_randomWords[0]);
+        triggerLotteryX(s_randomWords);
         delete currentLotteryTicketsId;
         s_lotteryCounter++;
         s_currentLottery = Lottery({
@@ -88,7 +91,8 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
-        emit ReturnedRandomness(randomWords);
+        emit LotteryCreated(s_currentLottery.lotteryId);
+        emit ReturnedRandomness(requestId);
     }
 
     // TICKETING AND GAME LOGIC
@@ -122,10 +126,12 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         address owner;
     }
 
-    event TicketBought(uint256[] ticket);
+    event TicketsBought(uint256[] ticketsId);
     event TicketCapModified(uint256 ticketCap);
     event TicketPriceModified(uint256 ticketPrice);
-    event LotteryCreated(Lottery lottery);
+    event LotteryCreated(uint256 indexed lotteryId);
+    event PrizeClaimed(uint256 indexed ticketId, uint256 prize);
+    event LotteryTriggered(uint256 indexed lotteryId, uint8[] selectedNumbers);
 
     modifier ticketClaimabilityChecker(uint256 ticketId) {
         if(ticketsIndex[ticketId].owner != msg.sender) {
@@ -143,6 +149,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     modifier checkLotteryResultsAnnounced(uint256 ticketId) {
+        require(ticketId <= s_ticketCounter, "The ticket has not been created.");
         uint256 lotteryId = ticketsIndex[ticketId].lotteryId;
         if(s_lotteries[lotteryId].resultsAnnounced == false) {
             revert("The lottery results have not been announced.");
@@ -201,6 +208,7 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         }
         ticketsIndex[ticketId].isItRedeemed = true;
         payable (msg.sender).transfer(prizeInEth);
+        emit PrizeClaimed(ticketId, prizeInEth);
     }
 
     function buyTicket(uint32 numTickets, uint8[] calldata selectedNumbers) 
@@ -215,6 +223,8 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         require(selectedNumbers.length <= SELECTED_NUMBERS_UPPER_LIMIT_USER, "Selected numbers must be equal or less than 10");
         require(s_currentLottery.resultsAnnounced == false, "The lottery should not be concluded");
         require(s_currentLottery.selectedNumbers.length == 0, "The lottery should not be concluded");
+
+        
 
         uint256[] memory ticketsIds = new uint256[](numTickets);
         uint8[] memory selectedNumbersFixed = selectedNumbers;
@@ -232,8 +242,10 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
             currentLotteryTicketsId.push(ticket.ticketId);
             ticketsIds[i] = s_ticketCounter;
             ticketsIndex[s_ticketCounter] = ticket;
-        }        
-        emit TicketBought(ticketsIds);
+        } 
+        uint operationsCoverage = msg.value * 2 / 100;
+        s_opVault.transfer(operationsCoverage);       
+        emit TicketsBought(ticketsIds);
     }
 
     function calculatePrize(uint256 ticketId) 
@@ -254,6 +266,18 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         require(s_lotteryCounter > 1, "There are no previous results yet");
         return s_lotteries[s_lotteryCounter - 1].selectedNumbers;
 
+    }
+
+    function getSelectedNumbersId(uint256 lotteryId) public view returns(uint8[] memory) {
+        if(lotteryId == 0) {
+            revert("Empty Lottery");
+        }
+        
+        if(s_lotteries[lotteryId].lotteryId == 0) {
+            revert("This lottery has not been created yet");
+        }
+
+        return s_lotteries[lotteryId].selectedNumbers;
     }
 
     function calculateRightGuesses(uint256 ticketId) 
@@ -281,21 +305,21 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         return rightGuesses;
     }
 
-    function triggerLottery(uint256 randomWord) internal virtual {
+    function triggerLotteryX(uint256[] memory randomWords) internal virtual {
         uint8[] memory transitSelectedNumbers = new uint8[](20);
         bool repeated;
-        //Lucky number 7 is arbitrary.
+        //Lucky number 7 is arbitrary
         uint256 helperUint = 7777;
         uint256 helperCount = 0;
         for(uint256 i = 0; i < SELECTED_NUMBERS_UPPER_LIMIT_LOTTERY; i++) {
             helperCount++;
             uint256 number;
-            number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao ))) % s_numberCeiling) + 1;
+            number = (uint256(keccak256(abi.encodePacked(randomWords[i], i, block.timestamp, block.prevrandao ))) % s_numberCeiling) + 1;
             if(repeated) {
                 helperUint + i;
                 uint256 helper = uint256(keccak256(abi.encodePacked(block.timestamp, helperUint, block.prevrandao, helperCount)));
-                number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao, helper ))) % s_numberCeiling) + 1;
-            } 
+                number = (uint256(keccak256(abi.encodePacked(randomWords[i], i, block.timestamp, block.prevrandao, helper ))) % s_numberCeiling) + 1;
+            }
             uint8 numberCast = uint8(number);
             if(!isNumberSelected(numberCast, transitSelectedNumbers)) {
                 transitSelectedNumbers[i] = uint8(number);
@@ -305,13 +329,42 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
                 i--;
             }
         }
-        setLottery(transitSelectedNumbers, true);
-        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+        setLottery(transitSelectedNumbers); 
+        emit LotteryTriggered(s_currentLottery.lotteryId, transitSelectedNumbers);
     }
+    // function triggerLottery(uint256 randomWord) internal virtual {
+    //     uint8[] memory transitSelectedNumbers = new uint8[](20);
+    //     bool repeated;
+    //     //Lucky number 7 is arbitrary.
+    //     uint256 helperUint = 7777;
+    //     uint256 helperCount = 0;
+    //     for(uint256 i = 0; i < SELECTED_NUMBERS_UPPER_LIMIT_LOTTERY; i++) {
+    //         helperCount++;
+    //         uint256 number;
+    //         number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao ))) % s_numberCeiling) + 1;
+    //         if(repeated) {
+    //             helperUint + i;
+    //             uint256 helper = uint256(keccak256(abi.encodePacked(block.timestamp, helperUint, block.prevrandao, helperCount)));
+    //             number = (uint256(keccak256(abi.encodePacked(randomWord, i, block.timestamp, block.prevrandao, helper ))) % s_numberCeiling) + 1;
+    //         } 
+    //         uint8 numberCast = uint8(number);
+    //         if(!isNumberSelected(numberCast, transitSelectedNumbers)) {
+    //             transitSelectedNumbers[i] = uint8(number);
+    //             repeated = false;
+    //         } else {
+    //             repeated = true;
+    //             i--;
+    //         }
+    //     }
+    //     setLottery(transitSelectedNumbers, true);
+    //     s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+    //     emit LotteryTriggered(s_currentLottery.lotteryId, transitSelectedNumbers);
+    // }
 
-    function setLottery(uint8[] memory selectedNumbers, bool result) internal virtual {
+    function setLottery(uint8[] memory selectedNumbers) internal virtual {
         s_currentLottery.selectedNumbers = selectedNumbers;
-        s_currentLottery.resultsAnnounced = result;
+        s_currentLottery.resultsAnnounced = true;
+        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
     }
 
     function isNumberSelected(uint8 number, uint8[] memory transitSelectedNumbers) internal pure returns(bool) {
@@ -376,19 +429,10 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
     }
 
     //AUTOMATION LOGIC
-
-    address public s_automationAddress;
     uint256 public s_interval;
     uint256 public s_lastTimeStamp;
 
-    modifier chainlinkAddress() {
-        require(msg.sender == s_automationAddress);
-        _;
-    }
-
-    function changeAutomationAddress(address automationAddress) external onlyOwner {
-        s_automationAddress = automationAddress;
-    }
+    event ChangeInterval(uint256 interval);
 
     function changeInterval(uint256 interval) external onlyOwner {
         s_interval = interval;
@@ -398,28 +442,52 @@ contract MagicNumbers is VRFConsumerBaseV2, AutomationCompatibleInterface{
         external 
         view 
         override 
-        chainlinkAddress
         returns(bool upkeepNeeded, bytes memory)
     {
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
         bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
         upkeepNeeded = lotteryTicketsCheck && timestampCheck;
-        return (upkeepNeeded,abi.encode("0x"));
     }
 
     function performUpkeep(bytes calldata) 
         external 
         override 
-        chainlinkAddress
     {
-
         bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
         bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
-        bool upkeepNeeded = lotteryTicketsCheck && timestampCheck;
+        bool check = lotteryTicketsCheck && timestampCheck;
 
-        if(upkeepNeeded) {
+        if(check) {
             s_lastTimeStamp = block.timestamp;
             requestRandomWords();
+        } else {
+            revert("Not ready to trigger a lottery");
+        }
+    }
+
+    ///DEBUGGING: USE ONLY FOR TESTING ON LOCAL ENVIROMENT,
+    function DEBUG_ONLY_setLottery(uint8[] memory selectedNumbers) public virtual {
+        s_currentLottery.selectedNumbers = selectedNumbers;
+        s_currentLottery.resultsAnnounced = true;
+        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+        delete currentLotteryTicketsId;
+        s_lotteryCounter++;
+        s_currentLottery = Lottery({
+            lotteryId: s_lotteryCounter,
+            selectedNumbers: new uint8[](0),
+            resultsAnnounced: false
+        });
+        emit LotteryCreated(s_currentLottery.lotteryId);
+    }
+
+    function DEBUG_ONLY_performUpkeep(bytes calldata, uint8[] memory seletedNumbers) external {
+        bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
+        bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
+        bool check = lotteryTicketsCheck && timestampCheck;
+
+        if(check) {
+            s_lastTimeStamp = block.timestamp;
+            DEBUG_ONLY_setLottery(seletedNumbers);
         } else {
             revert("Not ready to trigger a lottery");
         }
