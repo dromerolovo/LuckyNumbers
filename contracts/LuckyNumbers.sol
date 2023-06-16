@@ -41,6 +41,7 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
+        s_lotteries[s_lotteryCounter] = s_currentLottery;
         emit LotteryCreated(s_currentLottery.lotteryId);
         populatePrizeTable();
     }
@@ -89,6 +90,7 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
             selectedNumbers: new uint8[](0),
             resultsAnnounced: false
         });
+        s_lotteries[s_lotteryCounter] = s_currentLottery;
         emit LotteryCreated(s_currentLottery.lotteryId);
         emit ReturnedRandomness(requestId);
     }
@@ -464,29 +466,31 @@ contract LuckyNumbers is VRFConsumerBaseV2, AutomationCompatible{
     }
 
     ///DEBUGGING: USE ONLY FOR TESTING ON LOCAL ENVIROMENT,
-    // function DEBUG_ONLY_setLottery(uint8[] memory selectedNumbers) public virtual {
-    //     s_currentLottery.selectedNumbers = selectedNumbers;
-    //     s_currentLottery.resultsAnnounced = true;
-    //     s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
-    //     delete currentLotteryTicketsId;
-    //     s_lotteryCounter++;
-    //     s_currentLottery = Lottery({
-    //         lotteryId: s_lotteryCounter,
-    //         selectedNumbers: new uint8[](0),
-    //         resultsAnnounced: false
-    //     });
-    //     emit LotteryCreated(s_currentLottery.lotteryId);
-    // }
-
-    // function DEBUG_ONLY_performUpkeep(bytes calldata, uint8[] memory seletedNumbers) external {
-    //     bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
-    //     bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
-    //     bool check = lotteryTicketsCheck && timestampCheck;
-
-    //     if(check) {
-    //         s_lastTimeStamp = block.timestamp;
-    //         DEBUG_ONLY_setLottery(seletedNumbers);
-    //     } else {
-    //         revert("Not ready to trigger a lottery");
-    //     }
+    function DEBUG_ONLY_setLottery(uint8[] memory selectedNumbers) public virtual {
+        s_currentLottery.selectedNumbers = selectedNumbers;
+        s_currentLottery.resultsAnnounced = true;
+        s_lotteries[s_currentLottery.lotteryId] = s_currentLottery;
+        delete currentLotteryTicketsId;
+        s_lotteryCounter++;
+        s_currentLottery = Lottery({
+            lotteryId: s_lotteryCounter,
+            selectedNumbers: new uint8[](0),
+            resultsAnnounced: false
+        });
+        s_lotteries[s_lotteryCounter] = s_currentLottery;
+        emit LotteryCreated(s_currentLottery.lotteryId);
     }
+
+    function DEBUG_ONLY_performUpkeep(bytes calldata, uint8[] memory seletedNumbers) external {
+        bool lotteryTicketsCheck = currentLotteryTicketsId.length > 0;
+        bool timestampCheck = (block.timestamp - s_lastTimeStamp) > s_interval;
+        bool check = lotteryTicketsCheck && timestampCheck;
+
+        if(check) {
+            s_lastTimeStamp = block.timestamp;
+            DEBUG_ONLY_setLottery(seletedNumbers);
+        } else {
+            revert("Not ready to trigger a lottery");
+        }
+    }
+}

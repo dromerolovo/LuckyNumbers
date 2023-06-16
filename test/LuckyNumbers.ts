@@ -175,6 +175,13 @@ describe("LuckyNumbers Test", async function() {
             await expect(luckyNumbers.getSelectedNumbersId(4)).revertedWith("This lottery has not been created yet");
         });
 
+        it("Check Ids and created lotteries", async function() {
+            await (await luckyNumbers.buyTicket(1 ,userSelectedNumbers, {value: ticketPrice})).wait();
+            await time.setNextBlockTimestamp(await latest() + 1000);
+            await luckyNumbers.DEBUG_ONLY_performUpkeep(ethers.utils.hexlify('0x'), lotterySelectedNumbers , {gasLimit: 6000000});
+            expect((await luckyNumbers.s_lotteries(2)).lotteryId.toNumber()).to.be.equal(2);
+        });
+
 
     });
 
